@@ -1,0 +1,96 @@
+# ECHO OMEGA PRIME - Git Ignore
+# Authority: 11.0 SOVEREIGN | Commander: Bobby Don McWilliams II
+
+# === VERCEL ===
+.vercel
+.env*.local
+
+# === CREDENTIALS & SECRETS ===
+*.env
+.env*
+!.env.example
+**/secrets/
+**/.promethian_vault/
+**/SECURE_VAULT/
+**/api_keychain*.env
+**/credentials.vault
+**/credentials*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/service_account*.json
+**/*_token.txt
+**/hf_token.txt
+
+# === NODE.JS ===
+node_modules/
+.npm/
+.yarn/
+*.tsbuildinfo
+.next/
+.nuxt/
+dist/
+build/
+.cache/
+.turbo/
+
+# === PYTHON ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+*.whl
+
+# === DATABASES ===
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+!*.db.example
+
+# === IDE & OS ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === BUILD ARTIFACTS ===
+*.log
+logs/
+*.tmp
+*.temp
+temp/
+tmp/
+
+# === LARGE FILES ===
+*.mp4
+*.mov
+*.avi
+*.mp3
+*.wav
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# === BACKUP & ARCHIVE ===
+ARCHIVE/
+*_backup/
+*.bak
+
+# === SPECIFIC EXCLUSIONS ===
+CLAUDE_CODE_INSTANCES/*/projects/
+**/tasks/*.output
+**/MASTER_VAULT/
