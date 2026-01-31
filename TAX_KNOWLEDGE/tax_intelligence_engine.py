@@ -45,6 +45,17 @@ from tax_telemetry import (
     MutationOrigin
 )
 
+# ==============================================================================
+# SEMANTIC NORMALIZATION LAYER
+# ==============================================================================
+# GOVERNANCE NOTICE:
+# Semantic normalization is a preprocessing layer.
+# It must remain deterministic.
+# Do not attach probabilistic models to this stage.
+# No vector inference. No embeddings. No auto-learning.
+# ==============================================================================
+from semantic_dictionary import normalize_semantics, NormalizationResult
+
 # Configure production logging
 LOG_DIR = Path("O:/ECHO_OMEGA_PRIME/TAX_KNOWLEDGE/logs")
 LOG_DIR.mkdir(exist_ok=True)
@@ -247,7 +258,7 @@ class TaxResponse(BaseModel):
 
     # Audit
     timestamp: str
-    version: str = "1.1.0"  # Bumped for authority hardening
+    version: str = "1.2.0"  # Bumped for cognitive stability (semantic normalization)
 
 
 class HealthResponse(BaseModel):
@@ -9796,11 +9807,28 @@ class DoctrineEngine:
                 self.keyword_index[kw_lower].append(topic_key)
 
     def _compute_determinism_hash(self, query: str, topic_key: str, candidates: List[Dict]) -> str:
-        """Compute hash for determinism verification. Same inputs → same hash."""
+        """Compute hash for determinism verification. Same inputs → same hash.
+
+        ===========================================================================
+        ARCHITECTURE:
+            RAW QUERY
+                ↓
+            SEMANTIC NORMALIZATION (deterministic)
+                ↓
+            HASH  ← YOU ARE HERE
+                ↓
+            DOCTRINE MATCH
+
+        Semantic normalization is a preprocessing layer.
+        It must remain deterministic.
+        Do not attach probabilistic models to this stage.
+        ===========================================================================
+        """
         import hashlib
-        import re
-        # Normalize query: lowercase, collapse whitespace, strip
-        query_normalized = re.sub(r'\s+', ' ', query.lower().strip())
+        # Step 1: Semantic normalization (abbreviations, synonyms)
+        semantic_result = normalize_semantics(query)
+        # Step 2: The semantic normalizer already does lowercase + whitespace collapse
+        query_normalized = semantic_result.normalized
         # Include sorted candidate keys for reproducibility
         candidate_keys = sorted([c["topic_key"] for c in candidates])
         hash_input = f"{query_normalized}|{topic_key}|{','.join(candidate_keys)}"
@@ -9818,20 +9846,45 @@ class DoctrineEngine:
     def match_with_resolution(self, query: str, entity_type: Optional[str] = None) -> MatchResult:
         """Match query with full conflict detection and authority weighting.
 
+        ===========================================================================
+        ARCHITECTURE:
+            RAW QUERY
+                ↓
+            SEMANTIC NORMALIZATION (deterministic)  ← APPLIED HERE
+                ↓
+            HASH
+                ↓
+            DOCTRINE MATCH  ← YOU ARE HERE
+
+        Semantic normalization is a preprocessing layer.
+        It must remain deterministic.
+        Do not attach probabilistic models to this stage.
+        ===========================================================================
+
         AUTHORITY HARDENING:
         - Detects when multiple doctrines could apply (conflict detection)
         - Uses authority weighting as primary tiebreaker
         - Falls back to alphabetical topic_key for determinism
         - Returns explicit conflict resolution rationale
-        - Normalizes whitespace for deterministic matching
+        - Applies semantic normalization for variant resolution
 
         Returns:
             MatchResult with doctrine, conflict info, and determinism hash
         """
-        import re
-        # Normalize: lowercase, collapse whitespace, strip
-        query_normalized = re.sub(r'\s+', ' ', query.lower().strip())
+        # Step 1: Semantic normalization (abbreviations, synonyms, whitespace)
+        semantic_result = normalize_semantics(query)
+        query_normalized = semantic_result.normalized
         query_lower = query_normalized  # Use normalized for matching
+
+        # Telemetry: Log semantic variant detection (OBSERVATIONAL ONLY)
+        # This MUST NOT alter scoring or matching behavior
+        if semantic_result.was_modified:
+            logger.debug(
+                f"Semantic variant detected | "
+                f"original='{semantic_result.original}' | "
+                f"normalized='{semantic_result.normalized}' | "
+                f"variants={semantic_result.variants_detected}"
+            )
 
         # Score each doctrine
         candidates: List[Dict[str, Any]] = []
@@ -10176,6 +10229,8 @@ def log_audit_event(
 class TaxIntelligenceEngine:
     """Production tax intelligence engine."""
 
+    version: str = "1.2.0"  # Cognitive Stability Release (semantic normalization)
+
     def __init__(self):
         self.doctrine = DoctrineEngine()
         self.retrieval = RetrievalEngine()
@@ -10415,7 +10470,7 @@ class TaxIntelligenceEngine:
         return HealthResponse(
             status=status,
             engine="ECHO Tax Intelligence Engine",
-            version="1.0.0",
+            version=self.version,
             uptime_seconds=uptime,
 
             api_latency=latency_stats,
@@ -10501,7 +10556,7 @@ Professional-grade tax doctrine system for CPAs, attorneys, and audit teams.
 - Speed signals competence
 - Structured responses for professional use
     """,
-    version="1.0.0",
+    version="1.2.0",
     lifespan=lifespan
 )
 

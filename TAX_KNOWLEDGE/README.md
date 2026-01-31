@@ -285,6 +285,7 @@ Proprietary. Not for redistribution.
 
 | Version | Date       | Description                                |
 |---------|------------|--------------------------------------------|
+| 1.2.0   | 2026-01-30 | Cognitive Stability - Semantic Normalization |
 | 1.1.0   | 2026-01-30 | Authority Hardening Layer                  |
 | 1.0.0   | 2026-01-29 | Initial release with 84 doctrine topics    |
 
