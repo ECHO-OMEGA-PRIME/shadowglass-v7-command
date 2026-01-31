@@ -1,145 +1,293 @@
-# TAX KNOWLEDGE BASE
-**Authority: 11.0 SOVEREIGN | ECHO OMEGA PRIME**
-**Tags:** #TaxKnowledge #Research #Compliance #Federal #State
+# Tax Intelligence Engine
+
+**Deterministic Authority-Weighted Reasoning System**
+
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/bmcwilliams4/tax-intelligence-engine/releases)
+[![Authority Hardening](https://img.shields.io/badge/authority--hardening-verified-green.svg)](#authority-hardening-layer)
+[![Determinism](https://img.shields.io/badge/determinism-26%2F26%20tests-brightgreen.svg)](#testing-strategy)
 
 ---
 
-## PURPOSE
+## Overview
 
-Centralized repository for tax research, regulations, deductions, credits, and compliance information to support:
-- Personal tax planning and filing
-- Business tax compliance (S-Corp, LLC, etc.)
-- Deduction optimization
-- Credit identification
-- Audit defense preparation
+A reasoning engine designed for **auditability** and **determinism** in tax knowledge retrieval. The system eliminates black-box behavior by ensuring every conclusion is traceable to primary legal authority.
+
+Built for professional reliance by CPAs, attorneys, and audit defense teams.
+
+**Core Guarantee:** Identical queries produce identical reasoning paths, verifiable via cryptographic hashing.
 
 ---
 
-## DIRECTORY STRUCTURE
+## Architectural Principles
+
+### Determinism
+
+Every query is processed through a normalized pipeline:
+
+```
+Input → Normalize → Match → Weight → Hash → Respond
+```
+
+The `determinism_hash` field in each response allows verification that the same inputs will always produce the same outputs. Hash computation uses SHA-256 over the normalized query, matched doctrine key, and sorted candidate list.
+
+### Authority Weighting
+
+Tax conclusions derive from sources with varying legal weight. The engine applies a hierarchical scoring model:
+
+| Authority Level       | Weight | Examples                          |
+|-----------------------|--------|-----------------------------------|
+| Internal Revenue Code | 100    | IRC §162, §263A, §199A            |
+| Treasury Regulations  | 80     | Treas. Reg. §1.162-1              |
+| Court Precedent       | 60     | Exacto Spring, Watson v. US      |
+| IRS Guidance          | 40     | Revenue Procedures, Rulings      |
+| Publications          | 20     | IRS Pub 535, Pub 946              |
+
+This hierarchy reflects how positions are evaluated in audit and litigation contexts. Higher-authority sources control when conflicts exist.
+
+### Conflict Resolution
+
+When multiple doctrines score within 80% of the top candidate, the engine surfaces the conflict explicitly rather than selecting silently. The response includes:
+
+- Primary doctrine selected
+- Competing doctrines considered
+- Resolution rationale
+- Confidence differential
+
+This design prioritizes transparency over convenience.
+
+### Audit Replay
+
+All queries are logged with their determinism hash. Given a hash, the original reasoning path can be reconstructed. This supports:
+
+- Professional liability documentation
+- Historical query analysis
+- Consistency verification across time
+
+### Telemetry
+
+A telemetry spine captures:
+
+- Query trace IDs (8-character hash identifiers)
+- Layer timing (doctrine matching, vector search, response generation)
+- Error logging with stack traces
+- Reasoning snapshots at decision points
+
+Telemetry data is file-based for simplicity and portability.
+
+---
+
+## Authority Hardening Layer (v1.1.0)
+
+This release implements a hardened cognition layer focused on professional-grade reliability.
+
+**Components:**
+
+| Component                 | Description                                           |
+|---------------------------|-------------------------------------------------------|
+| Conflict Detection        | 80% threshold for surfacing competing doctrines       |
+| Precedent Anchoring       | Binds conclusions to controlling case law             |
+| Confidence Stratification | Four-tier risk classification per conclusion          |
+| Determinism Hashing       | SHA-256 verification of reasoning consistency         |
+| Whitespace Normalization  | Regex-based query normalization for stable matching   |
+
+**Confidence Stratification:**
+
+| Level                   | Meaning                              |
+|-------------------------|--------------------------------------|
+| `defensible`            | Position fully supportable           |
+| `aggressive_supportable`| Arguable, document rationale         |
+| `disclosure_recommended`| Form 8275 disclosure advisable       |
+| `high_audit_risk`       | Significant controversy potential    |
+
+---
+
+## Testing Strategy
+
+The adversarial test suite validates deterministic behavior across 9 categories:
+
+| Test Category              | Purpose                                    | Status |
+|----------------------------|--------------------------------------------|--------|
+| Repeated Identical Queries | Same query 10x returns identical hash      | Pass   |
+| Case Sensitivity           | `QUERY` = `query` = `Query`                | Pass   |
+| Whitespace Normalization   | Tabs, double-spaces, leading/trailing      | Pass   |
+| Multi-Doctrine Conflicts   | Competing doctrine resolution consistency  | Pass   |
+| Edge Cases                 | Empty, special characters, long queries    | Pass   |
+| Concurrent Queries         | 20 simultaneous requests, thread safety    | Pass   |
+| Authority Weight Stability | Consistent weighting across runs           | Pass   |
+| Response Mode Independence | Mode selection doesn't affect doctrine     | Pass   |
+| Semantic Equivalence       | Related phrasings match same doctrine      | Pass   |
+
+**Result:** 26/26 tests pass.
+
+---
+
+## Query Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              QUERY LIFECYCLE                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  User Query                                                             │
+│       │                                                                 │
+│       ▼                                                                 │
+│  ┌─────────────────┐                                                    │
+│  │ Normalize       │  lowercase, collapse whitespace, trim             │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │ Doctrine Match  │  keyword scoring against 84 doctrine topics       │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │ Authority Weight│  aggregate source weights (IRC=100...Pub=20)      │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │ Conflict Check  │  surface if multiple doctrines within 80%         │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │ Compute Hash    │  SHA-256(normalized_query|topic_key|candidates)   │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │ Telemetry Log   │  trace_id, timing, decision points                │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  Auditable Response                                                     │
+│  {                                                                      │
+│    "doctrine_match": true,                                              │
+│    "authority_weight": 320,                                             │
+│    "confidence_stratification": "defensible",                           │
+│    "controlling_precedent": "Exacto Spring Corp v. Commissioner",       │
+│    "determinism_hash": "45a462a6069d9432",                              │
+│    "conflict_detected": false                                           │
+│  }                                                                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Why This Exists
+
+Most AI reasoning systems operate as black boxes. A question goes in, an answer comes out, and the path between them is opaque. For domains with legal or financial consequences, this opacity is unacceptable.
+
+This system explores a different architecture: **inspectable machine judgment**. Every conclusion carries its provenance—the sources consulted, the conflicts detected, the authority weights applied. The goal is not to replace professional judgment but to make AI-assisted reasoning auditable enough to support it.
+
+---
+
+## Engineering Approach
+
+- **Governance tagging** — semantic versioning with annotated release notes
+- **Rollback-safe releases** — no partial states, all dependencies resolved
+- **Audit-first design** — logging and traceability precede features
+- **Determinism verification** — adversarial testing before each release
+- **Production telemetry** — observability built into the core loop
+
+---
+
+## Future Direction
+
+Potential extensions under consideration:
+
+- Multi-domain reasoning (expanding beyond tax to regulatory compliance)
+- Programmable doctrine engines (user-defined authority hierarchies)
+- Citation graph analysis (precedent relationship mapping)
+- Temporal versioning (how would this query resolve under 2020 law?)
+
+These remain speculative. The current focus is stability and reliability.
+
+---
+
+## Setup
+
+### Requirements
+
+- Python 3.11+
+- Dependencies: `fastapi`, `uvicorn`, `chromadb`, `sentence-transformers`, `loguru`
+
+### Installation
+
+```bash
+pip install fastapi uvicorn chromadb sentence-transformers loguru requests
+```
+
+### Running
+
+```bash
+cd TAX_KNOWLEDGE
+python tax_intelligence_engine.py
+```
+
+Server starts on `http://localhost:8391`
+
+### Health Check
+
+```bash
+curl http://localhost:8391/health
+```
+
+### Example Query
+
+```bash
+curl -X POST http://localhost:8391/tax/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is reasonable compensation for S-corp shareholders?", "mode": "fast"}'
+```
+
+---
+
+## API Endpoints
+
+| Endpoint                           | Method | Description                       |
+|------------------------------------|--------|-----------------------------------|
+| `/health`                          | GET    | Service health and uptime         |
+| `/tax/query`                       | POST   | Primary query interface           |
+| `/hardening/verify-determinism`    | POST   | Verify hash consistency           |
+| `/hardening/authority-weights`     | GET    | Retrieve weight hierarchy         |
+| `/hardening/confidence-stratification` | GET | Get stratification definitions |
+
+---
+
+## Repository Structure
 
 ```
 TAX_KNOWLEDGE/
-├── FEDERAL/           # Federal tax code, IRS regulations
-├── STATE/             # State-specific tax rules (Texas, etc.)
-├── BUSINESS/          # Business entity taxation (S-Corp, LLC)
-├── PERSONAL/          # Personal income tax
-├── DEDUCTIONS/        # Comprehensive deduction library
-├── CREDITS/           # Tax credit research
-├── FORMS/             # Form templates and instructions
-├── RESEARCH/          # Tax research notes and case studies
-└── TEMPLATES/         # Calculation templates, checklists
+├── tax_intelligence_engine.py   # Core engine (84 doctrine topics)
+├── tax_telemetry.py             # Telemetry infrastructure
+├── tax_doctrine_cache.py        # Pre-built doctrine knowledge
+├── adversarial_authority_test.py# Determinism test suite
+├── tax_expert_search.py         # Vector search interface
+├── tax_expert_service.py        # Service orchestration
+├── tax_expert_api.py            # API layer
+├── test_hardening.ps1           # PowerShell verification
+├── test_whitespace_fix.py       # Normalization validation
+└── README.md
 ```
 
 ---
 
-## USAGE
+## License
 
-### Quick Reference
-- **Federal Tax Brackets**: `FEDERAL/tax_brackets_2025.md`
-- **S-Corp Deductions**: `BUSINESS/s_corp_deductions.md`
-- **Home Office**: `DEDUCTIONS/home_office.md`
-- **Vehicle Deductions**: `DEDUCTIONS/vehicle_business_use.md`
-
-### Research Workflow
-1. Identify tax question or optimization opportunity
-2. Search relevant directory (FEDERAL, BUSINESS, DEDUCTIONS, etc.)
-3. Cross-reference IRS publications
-4. Document findings in RESEARCH/
-5. Update applicable templates
+Proprietary. Not for redistribution.
 
 ---
 
-## KEY TOPICS
+## Version History
 
-### Federal
-- Tax brackets and rates (2024-2025)
-- Standard deductions vs itemized
-- Self-employment tax (SE tax)
-- Estimated quarterly payments
-- IRS publication index
-
-### Business
-- S-Corporation taxation
-- LLC taxation options
-- Reasonable compensation (W-2 salary)
-- Pass-through deductions (Section 199A)
-- Business expense categories
-
-### Deductions
-- Home office (Form 8829)
-- Vehicle business use (actual vs mileage)
-- Business meals and entertainment
-- Travel expenses
-- Professional development and education
-- Software and technology
-- Health insurance (self-employed)
-- Retirement contributions (SEP-IRA, Solo 401k)
-
-### Credits
-- Child Tax Credit
-- Earned Income Credit
-- Education credits (American Opportunity, Lifetime Learning)
-- Energy efficiency credits
-- R&D Tax Credit (business)
+| Version | Date       | Description                                |
+|---------|------------|--------------------------------------------|
+| 1.1.0   | 2026-01-30 | Authority Hardening Layer                  |
+| 1.0.0   | 2026-01-29 | Initial release with 84 doctrine topics    |
 
 ---
 
-## INTEGRATION WITH ECHO SYSTEMS
-
-### PROMETHEUS PRIME
-Tax research queries can leverage PROMETHEUS for OSINT:
-```bash
-curl http://192.168.1.202:8370/osint/tax-law-search?query="S-Corp reasonable compensation"
-```
-
-### CRYSTAL MEMORY
-Store important tax findings:
-```python
-from master_vault import store_tax_knowledge
-store_tax_knowledge("s_corp_salary_calculation", data)
-```
-
-### GS343 Healer
-Tax calculation error checking:
-```bash
-curl http://localhost:5003/heal/tax-calculation
-```
-
----
-
-## COMPLIANCE NOTES
-
-- **NOT LEGAL ADVICE**: This is research/reference only
-- **Verify with CPA**: Always consult licensed tax professional
-- **Stay Current**: Tax law changes annually
-- **Document Sources**: Always cite IRS publications, tax code sections
-
----
-
-## ANNUAL MAINTENANCE
-
-- [ ] Update tax brackets (January)
-- [ ] Review new tax law changes
-- [ ] Update deduction limits (mileage rate, meal limits, etc.)
-- [ ] Review state tax changes
-- [ ] Update form templates
-
----
-
-## RESOURCES
-
-### Official Sources
-- IRS.gov (official publications)
-- State comptroller websites
-- Tax code (26 U.S.C.)
-
-### Tools
-- IRS Free File
-- Tax calculation spreadsheets
-- Deduction trackers
-
----
-
-**Created:** 2026-01-30
-**Last Updated:** 2026-01-30
-**Maintained by:** ECHO OMEGA PRIME
+*Deterministic reasoning infrastructure for professional tax practice.*
