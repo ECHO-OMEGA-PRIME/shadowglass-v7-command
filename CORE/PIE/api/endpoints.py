@@ -15,8 +15,10 @@ System Class: ISOLATED_REASONING_ENGINE
 Governance Tier: ZERO
 """
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
+
+from .dependencies import require_ingest_auth
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -473,13 +475,18 @@ async def analyze_impact(
 @app.post("/engineering/ingest")
 async def ingest_documents(
     request: IngestionRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    auth: dict = Depends(require_ingest_auth)
 ):
     """
     Ingest documents into the PIE.
 
+    REQUIRES: TIER_80+ authority (authentication enforced before handler)
+
     Parse → Classify → Authority Score → Version Tag → Graph Link → Doctrine Create
     """
+    # Auth dependency already validated - auth contains actor_id and authority_tier
+    logger.info(f"INGEST: actor={auth['actor_id']}, tier={auth['authority_tier']}")
     doctrine_eng, version_eng, graph, sentinel, pipeline = get_engines()
 
     from ..ingestion.pipeline import IngestionConfig
