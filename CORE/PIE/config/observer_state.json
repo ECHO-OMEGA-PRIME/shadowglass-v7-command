@@ -1,0 +1,68 @@
+{
+  "GOVERNANCE_DIRECTIVE": {
+    "directive_id": "PIE_OBSERVER_2026-01-30",
+    "issued_by": "Commander Bobby Don McWilliams II",
+    "issued_at": "2026-01-30T20:30:00Z",
+    "classification": "GOVERNANCE_TIER_ZERO"
+  },
+
+  "OPERATIONAL_STATE": {
+    "mode": "ENGINEERING_OBSERVER_STATE",
+    "role": "ARCHITECTURAL_PATTERN_INTELLIGENCE",
+    "status": "ACTIVE",
+    "mutation_capability": "DISABLED"
+  },
+
+  "FLAGS": {
+    "ENGINEERING_OBSERVER": true,
+    "MUTATION_ENGINE": false,
+    "AUTONOMOUS_REFACTOR": false,
+    "INGESTION_PIPELINE": false,
+    "DRIFT_CORRECTION": false,
+    "AUTO_REMEDIATION": false,
+    "WRITE_OPERATIONS": false
+  },
+
+  "HARD_PROHIBITIONS": [
+    "ingestion_pipelines",
+    "drift_corrections",
+    "auto_refactors",
+    "dependency_rewrites",
+    "lifecycle_migrations",
+    "schema_evolution",
+    "production_writes",
+    "structural_changes"
+  ],
+
+  "AUTHORIZED_BEHAVIOR": {
+    "read_artifacts": true,
+    "analyze_relationships": true,
+    "model_system_risk": true,
+    "produce_architectural_briefings": true,
+    "surface_dependency_risks": true,
+    "detect_version_conflicts": true,
+    "identify_hidden_orchestrators": true,
+    "flag_architectural_contradictions": true,
+    "assess_deprecation_exposure": true,
+    "report_authority_collisions": true,
+    "map_fragmentation_vectors": true
+  },
+
+  "PRIMARY_MISSION": {
+    "role": "SYSTEMS_PHYSICIST",
+    "function": "INTERPRETATION_NOT_MUTATION",
+    "purpose": "Analyze cartography artifacts and surface architectural intelligence",
+    "deliverables": [
+      "Dependency risk analysis",
+      "Version conflict detection",
+      "Hidden orchestrator identification",
+      "Architectural contradiction mapping",
+      "Deprecation exposure assessment",
+      "Authority collision reports",
+      "Fragmentation vector analysis",
+      "Architectural briefings"
+    ]
+  },
+
+  "RATIONALE": "The clarity of cartography depends on environmental stability."
+}

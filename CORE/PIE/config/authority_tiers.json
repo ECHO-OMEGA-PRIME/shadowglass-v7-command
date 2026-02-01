@@ -1,0 +1,151 @@
+{
+  "AUTHORITY_HIERARCHY": {
+    "TIER_100": {
+      "name": "Primary Sources",
+      "weight": 100,
+      "description": "Official vendor documentation from source maintainers",
+      "sources": {
+        "vendors": [
+          "Apple Developer Documentation",
+          "Google Cloud Documentation",
+          "Microsoft Docs",
+          "AWS Documentation",
+          "Meta Developer Docs"
+        ],
+        "language_maintainers": [
+          "Python.org Documentation",
+          "Rust Official Docs",
+          "Go Documentation",
+          "TypeScript Handbook",
+          "Kotlin Documentation",
+          "Swift Documentation"
+        ],
+        "framework_creators": [
+          "React Official Docs",
+          "Angular Documentation",
+          "Vue.js Guide",
+          "Next.js Documentation",
+          "Django Documentation",
+          "FastAPI Documentation",
+          "Flask Documentation",
+          "Express.js Guide"
+        ]
+      },
+      "trust_level": "ABSOLUTE",
+      "override_capability": true
+    },
+    "TIER_80": {
+      "name": "Canonical Engineering Sources",
+      "weight": 80,
+      "description": "Industry-standard infrastructure documentation",
+      "sources": {
+        "container_orchestration": [
+          "Kubernetes Official Documentation",
+          "Docker Documentation",
+          "Podman Documentation"
+        ],
+        "infrastructure": [
+          "Terraform Documentation",
+          "Pulumi Documentation",
+          "Ansible Documentation"
+        ],
+        "version_control": [
+          "GitHub Official Docs",
+          "GitLab Documentation",
+          "Git SCM Documentation"
+        ],
+        "cloud_native": [
+          "Helm Documentation",
+          "Istio Documentation",
+          "Envoy Proxy Docs"
+        ]
+      },
+      "trust_level": "HIGH",
+      "override_capability": true
+    },
+    "TIER_60": {
+      "name": "Structured Technical Authorities",
+      "weight": 60,
+      "description": "Standards bodies and formal specifications",
+      "sources": {
+        "standards": [
+          "IETF RFCs",
+          "W3C Specifications",
+          "ECMA Standards",
+          "ISO Standards",
+          "IEEE Standards"
+        ],
+        "security": [
+          "OWASP Guidelines",
+          "NIST Publications",
+          "CVE Database",
+          "Security Advisories"
+        ],
+        "protocols": [
+          "OAuth 2.0 Specification",
+          "OpenID Connect",
+          "JSON Schema",
+          "OpenAPI Specification"
+        ]
+      },
+      "trust_level": "FORMAL",
+      "override_capability": false
+    },
+    "TIER_40": {
+      "name": "Verified Expert Material",
+      "weight": 40,
+      "description": "Authoritative content from recognized experts",
+      "sources": {
+        "maintainer_content": [
+          "Core maintainer blogs",
+          "Official engineering blogs",
+          "Release notes and changelogs"
+        ],
+        "deep_dives": [
+          "Architecture Decision Records",
+          "Design documents",
+          "Post-mortems from major vendors"
+        ],
+        "verified_tutorials": [
+          "Official tutorials",
+          "Vendor-sponsored guides",
+          "Certified training materials"
+        ]
+      },
+      "trust_level": "VERIFIED",
+      "override_capability": false
+    },
+    "TIER_20": {
+      "name": "Community Knowledge",
+      "weight": 20,
+      "description": "Vetted community contributions",
+      "sources": {
+        "qa_platforms": [
+          "StackOverflow (high-vote answers)",
+          "GitHub Discussions (maintainer-endorsed)",
+          "Reddit (verified sources only)"
+        ],
+        "community_docs": [
+          "Community wikis",
+          "Awesome lists",
+          "Curated tutorials"
+        ]
+      },
+      "trust_level": "COMMUNITY",
+      "override_capability": false,
+      "requires_verification": true
+    }
+  },
+  "CONFLICT_RESOLUTION": {
+    "rule": "HIGHER_AUTHORITY_WINS",
+    "tie_breaker": "MOST_RECENT_VERSION",
+    "ambiguity_handling": "FLAG_FOR_REVIEW",
+    "logging": true
+  },
+  "METADATA": {
+    "version": "1.0.0",
+    "created": "2026-01-30",
+    "authority": "Commander Bobby Don McWilliams II",
+    "classification": "TIER_ZERO_INFRASTRUCTURE"
+  }
+}
