@@ -1,16 +1,31 @@
 {
   "GOVERNANCE_DIRECTIVE": {
-    "directive_id": "PIE_OBSERVER_2026-01-30",
+    "directive_id": "PIE_SCOPE_FREEZE_2026-02-01",
     "issued_by": "Commander Bobby Don McWilliams II",
-    "issued_at": "2026-01-30T20:30:00Z",
-    "classification": "GOVERNANCE_TIER_ZERO"
+    "issued_at": "2026-02-01T00:30:00Z",
+    "classification": "GOVERNANCE_TIER_ZERO",
+    "version": "2.0.0"
+  },
+
+  "SCOPE_FREEZE": {
+    "status": "PERMANENTLY_FROZEN",
+    "effective_date": "2026-02-01",
+    "declaration": "PIE is ENGINEERING_OBSERVER by default. It analyzes what exists. It does NOT improve it.",
+    "immutable_constraints": [
+      "MUTATION = OFF",
+      "INGESTION = OFF",
+      "REFACTOR = OFF",
+      "REMEDIATION = OFF",
+      "WRITE_OPERATIONS = OFF"
+    ]
   },
 
   "OPERATIONAL_STATE": {
     "mode": "ENGINEERING_OBSERVER_STATE",
     "role": "ARCHITECTURAL_PATTERN_INTELLIGENCE",
     "status": "ACTIVE",
-    "mutation_capability": "DISABLED"
+    "mutation_capability": "PERMANENTLY_DISABLED",
+    "default_mode": "OBSERVER_ONLY"
   },
 
   "FLAGS": {
