@@ -1352,6 +1352,41 @@ HOW TO BUILD AN ENGINE:
   GUI_APPLICATION, AUTOMATION_SCRIPT, CLOUDFLARE_WORKER, DISCORD_BOT,
   TELEGRAM_BOT, BROWSER_EXTENSION, MOBILE_APP, CHROME_EXTENSION, VSCODE_EXTENSION
 
+PARALLEL FORGE — MANDATORY FOR LARGE-SCALE OPERATIONS:
+  For bulk operations (100+ engines), ALWAYS launch multiple forge instances in parallel.
+  Never process engines one at a time when you can parallelize.
+
+  Strategy: Split → Parallelize → Monitor → Merge
+
+  Cloud Parallel (fire N requests simultaneously):
+    for chunk in ACCT01,ACCT02,ACCT03 AERO01,AERO02,AERO03 AUTO01,AUTO02,AUTO03; do
+      curl -s -X POST "https://hephaestion-forge.bmcii1976.workers.dev/forge" \
+        -H "Content-Type: application/json" \
+        -d "{\"engines\":\"$chunk\",\"mode\":\"doctrine_generation\"}" &
+    done
+    wait
+    curl -s "https://hephaestion-forge.bmcii1976.workers.dev/projects?status=active"
+
+  Local Parallel (multiple forks on different engine ranges):
+    python hephaestion_forge.py --all-engines --start-at 0 --end-at 900 --log-file forge_A.jsonl &
+    python hephaestion_forge.py --all-engines --start-at 900 --end-at 1800 --log-file forge_B.jsonl &
+    python hephaestion_forge.py --all-engines --start-at 1800 --end-at 2700 --log-file forge_C.jsonl &
+    python hephaestion_forge.py --all-engines --start-at 2700 --end-at 3600 --log-file forge_D.jsonl &
+    python forge_monitor.py --refresh 3  # monitor ALL forks
+
+  Hybrid Parallel (cloud + ALPHA + BRAVO):
+    Cloud: first third (zero local CPU cost)
+    ALPHA (this PC): second third (local hephaestion_forge.py)
+    BRAVO (192.168.1.11): final third (remote via Invoke-Command)
+
+  Scaling Rules:
+    < 10 engines    → single forge call
+    10-100 engines  → 2-3 parallel forks (cloud + local)
+    100-1000 engines → 4-6 parallel forks (cloud + local + BRAVO)
+    1000+ engines   → maximum parallelism: cloud + ALPHA + BRAVO + all forks
+    ALWAYS run forge_monitor.py when parallel forks are active
+    NEVER process engines one-by-one — if you catch yourself doing serial, STOP and parallelize
+
 LLM ARSENAL (42+ providers, ALL FREE):
   Azure GPT-4.1 (primary) → GitHub Models (10) → OpenRouter (18+ keys) →
   DeepSeek/Groq/xAI (direct) → Workers AI (fallback). Auto-failover.

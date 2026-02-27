@@ -408,6 +408,67 @@ Analyze → Architecture → Scaffold → Dependencies → Core Implementation �
 ### 15 Archetypes
 `PYTHON_APP` | `ELECTRON_APP` | `WEB_APP` | `CLI_TOOL` | `MCP_SERVER` | `API_SERVICE` | `GUI_APPLICATION` | `AUTOMATION_SCRIPT` | `CLOUDFLARE_WORKER` | `DISCORD_BOT` | `TELEGRAM_BOT` | `BROWSER_EXTENSION` | `MOBILE_APP` | `CHROME_EXTENSION` | `VSCODE_EXTENSION`
 
+### PARALLEL FORGE — MANDATORY FOR LARGE-SCALE OPERATIONS
+
+**For bulk operations (100+ engines), ALWAYS launch multiple forge instances in parallel.**
+Never process engines one at a time when you can parallelize. The cloud worker handles
+concurrent requests. The local forge supports fork splitting. USE BOTH.
+
+**Strategy: Split → Parallelize → Monitor → Merge**
+
+**Cloud Parallel (fire N requests simultaneously):**
+```bash
+# Split 3,600 engines into chunks, fire parallel forge requests
+# Each curl runs in background (&), collect all project IDs
+for chunk in ACCT01,ACCT02,ACCT03 AERO01,AERO02,AERO03 AUTO01,AUTO02,AUTO03; do
+  curl -s -X POST "https://hephaestion-forge.bmcii1976.workers.dev/forge" \
+    -H "Content-Type: application/json" \
+    -d "{\"engines\":\"$chunk\",\"mode\":\"doctrine_generation\"}" &
+done
+wait  # Wait for all to complete
+
+# Monitor all active projects
+curl -s "https://hephaestion-forge.bmcii1976.workers.dev/projects?status=active"
+```
+
+**Local Parallel (multiple forge forks on different engine ranges):**
+```bash
+# Fork A: engines 0-899
+python hephaestion_forge.py --all-engines --start-at 0 --end-at 900 --log-file forge_A.jsonl &
+# Fork B: engines 900-1799
+python hephaestion_forge.py --all-engines --start-at 900 --end-at 1800 --log-file forge_B.jsonl &
+# Fork C: engines 1800-2699
+python hephaestion_forge.py --all-engines --start-at 1800 --end-at 2700 --log-file forge_C.jsonl &
+# Fork D: engines 2700-3600
+python hephaestion_forge.py --all-engines --start-at 2700 --end-at 3600 --log-file forge_D.jsonl &
+
+# Monitor ALL forks in real-time
+python forge_monitor.py --refresh 3
+```
+
+**Hybrid Parallel (cloud + local + BRAVO node):**
+```bash
+# Cloud: handles first third (zero local CPU cost)
+curl -s -X POST "https://hephaestion-forge.bmcii1976.workers.dev/forge" \
+  -d '{"engines":"batch_1_of_3","count":1200}' &
+
+# ALPHA (this PC): handles second third
+python hephaestion_forge.py --all-engines --start-at 1200 --end-at 2400 &
+
+# BRAVO (192.168.1.11): handles final third
+Invoke-Command -ComputerName 192.168.1.11 -ScriptBlock {
+  python O:\hephaestion_forge.py --all-engines --start-at 2400 --end-at 3600
+} &
+```
+
+**Scaling Rules:**
+- **< 10 engines** → single forge call, no parallelism needed
+- **10-100 engines** → 2-3 parallel forks (cloud + local)
+- **100-1000 engines** → 4-6 parallel forks (cloud + local + BRAVO)
+- **1000+ engines** → maximum parallelism: cloud + ALPHA + BRAVO + all available forks
+- **Monitor**: ALWAYS run `forge_monitor.py` when parallel forks are active
+- **Never serial**: If you catch yourself processing engines one-by-one, STOP and parallelize
+
 ### LLM Arsenal (42+ providers, ALL FREE)
 Azure GPT-4.1 (primary) → GitHub Models (10 models) → OpenRouter (18+ keys) → DeepSeek/Groq/xAI (direct) → Workers AI (fallback). Auto-failover on errors.
 
