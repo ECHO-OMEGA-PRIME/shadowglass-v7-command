@@ -684,6 +684,37 @@ const SERVICE_CATALOG = [
 ];
 
 // ═══════════════════════════════════════════════════════════════
+// RATE LIMITING (KV-based)
+// ═══════════════════════════════════════════════════════════════
+
+const RATE_LIMITS = {
+  '/public/chat':  { max: 10, window: 60 },   // 10 per minute
+  '/inquiries':    { max: 5,  window: 300 },   // 5 per 5 minutes
+};
+
+async function checkRateLimit(path, request, env) {
+  const limit = RATE_LIMITS[path];
+  if (!limit) return null; // no limit for this path
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const key = `rl:${path}:${ip}`;
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const stored = await env.CACHE.get(key, 'json');
+    if (stored && stored.reset > now) {
+      if (stored.count >= limit.max) {
+        log('warn', 'Rate limited', { ip, path, count: stored.count });
+        return err('Too many requests. Please try again later.', 429);
+      }
+      stored.count++;
+      await env.CACHE.put(key, JSON.stringify(stored), { expirationTtl: stored.reset - now });
+    } else {
+      await env.CACHE.put(key, JSON.stringify({ count: 1, reset: now + limit.window }), { expirationTtl: limit.window });
+    }
+  } catch (_) {} // fail open — don't block requests if KV is down
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ROUTE HANDLER
 // ═══════════════════════════════════════════════════════════════
 
@@ -698,6 +729,10 @@ export default {
     log('info', 'Request', { method, path });
 
     try {
+      // ─── Rate limit public endpoints ───
+      const rateLimited = await checkRateLimit(path, request, env);
+      if (rateLimited) return rateLimited;
+
       // ─── Public (no auth) ───
       if (path === '/health') return handleHealth(env);
       if (path === '/public/chat' && method === 'POST') return handlePublicChat(request, env);
@@ -746,7 +781,11 @@ export default {
       // Expenses
       if (path === '/expenses' && method === 'GET') return handleListExpenses(url, env);
       if (path === '/expenses' && method === 'POST') return handleCreateExpense(request, env);
+      if (path.match(/^\/expenses\/\d+$/) && method === 'PUT') return handleUpdateExpense(request, path, env);
       if (path.match(/^\/expenses\/\d+$/) && method === 'DELETE') return handleDeleteExpense(path, env);
+
+      // Accounting Summary
+      if (path === '/accounting/summary' && method === 'GET') return handleAccountingSummary(url, env);
 
       // Reviews
       if (path === '/reviews' && method === 'GET') return handleListReviews(env);
@@ -801,6 +840,34 @@ export default {
       if (path === '/admin/crm/guests' && method === 'GET') return handleCRMGuests(url, env);
       if (path.match(/^\/guests\/\d+\/notes$/) && method === 'POST') return handleUpdateGuestNotes(request, path, env);
       if (path === '/admin/crm/guests' && method === 'POST') return handleCreateCRMGuest(request, env);
+
+      // Admin Inventory
+      if (path === '/admin/inventory' && method === 'GET') return handleListInventory(url, env);
+      if (path === '/admin/inventory' && method === 'POST') return handleCreateInventoryItem(request, env);
+      if (path.match(/^\/admin\/inventory\/\d+$/) && method === 'PUT') return handleUpdateInventoryItem(request, path, env);
+      if (path.match(/^\/admin\/inventory\/\d+$/) && method === 'DELETE') return handleDeleteInventoryItem(path, env);
+      if (path.match(/^\/admin\/inventory\/\d+\/movement$/) && method === 'POST') return handleInventoryMovement(request, path, env);
+
+      // Admin Dispatch (task kanban)
+      if (path === '/admin/dispatch/tasks' && method === 'GET') return handleListDispatchTasks(url, env);
+      if (path === '/admin/dispatch/tasks' && method === 'POST') return handleCreateDispatchTask(request, env);
+      if (path.match(/^\/admin\/dispatch\/tasks\/\d+$/) && method === 'PUT') return handleUpdateDispatchTask(request, path, env);
+      if (path.match(/^\/admin\/dispatch\/tasks\/\d+$/) && method === 'DELETE') return handleDeleteDispatchTask(path, env);
+
+      // Admin Planner (occupancy calendar + notes)
+      if (path === '/admin/planner/data' && method === 'GET') return handlePlannerData(url, env);
+      if (path === '/admin/planner/notes' && method === 'GET') return handleListPlannerNotes(url, env);
+      if (path === '/admin/planner/notes' && method === 'POST') return handleCreatePlannerNote(request, env);
+      if (path.match(/^\/admin\/planner\/notes\/\d+$/) && method === 'DELETE') return handleDeletePlannerNote(path, env);
+      if (path.match(/^\/admin\/planner\/notes\/\d+\/pin$/) && method === 'POST') return handleTogglePinNote(path, env);
+
+      // Admin Payroll
+      if (path === '/admin/payroll/employees' && method === 'GET') return handlePayrollEmployees(env);
+      if (path === '/admin/payroll/employees' && method === 'POST') return handleCreatePayrollEmployee(request, env);
+      if (path.match(/^\/admin\/payroll\/employees\/\d+$/) && method === 'PUT') return handleUpdatePayrollEmployee(request, path, env);
+      if (path === '/admin/payroll/runs' && method === 'GET') return handleListPayrollRuns(url, env);
+      if (path === '/admin/payroll/runs' && method === 'POST') return handleCreatePayrollRun(request, env);
+      if (path.match(/^\/admin\/payroll\/runs\/\d+$/) && method === 'GET') return handleGetPayrollRun(path, env);
 
       // Notifications
       if (path === '/notifications' && method === 'GET') return handleListNotifications(url, env);
@@ -1374,10 +1441,121 @@ async function handleCreateExpense(request, env) {
   return json({ id: result.meta.last_row_id, success: true }, 201);
 }
 
+async function handleUpdateExpense(request, path, env) {
+  const id = path.split('/').pop();
+  const body = await request.json();
+  const fields = [];
+  const values = [];
+  for (const [k, v] of Object.entries(body)) {
+    if (['category', 'description', 'amount', 'date', 'vendor', 'property', 'recurring', 'status'].includes(k)) {
+      fields.push(`${k} = ?`);
+      values.push(k === 'recurring' ? (v ? 1 : 0) : v);
+    }
+  }
+  if (fields.length === 0) return err('No valid fields');
+  values.push(id);
+  await env.DB.prepare(`UPDATE expenses SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+  return json({ success: true });
+}
+
 async function handleDeleteExpense(path, env) {
   const id = path.split('/').pop();
   await env.DB.prepare('DELETE FROM expenses WHERE id = ?').bind(id).run();
   return json({ success: true });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACCOUNTING SUMMARY
+// ═══════════════════════════════════════════════════════════════
+
+async function handleAccountingSummary(url, env) {
+  const period = url.searchParams.get('period') || 'mtd';
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+
+  let startDate, prevStartDate, prevEndDate;
+
+  if (period === 'mtd') {
+    startDate = `${year}-${month}-01`;
+    const pm = now.getMonth() === 0 ? 12 : now.getMonth();
+    const py = now.getMonth() === 0 ? year - 1 : year;
+    prevStartDate = `${py}-${String(pm).padStart(2, '0')}-01`;
+    prevEndDate = startDate;
+  } else if (period === 'qtd') {
+    const qm = Math.floor(now.getMonth() / 3) * 3 + 1;
+    startDate = `${year}-${String(qm).padStart(2, '0')}-01`;
+    const pqm = qm <= 3 ? qm + 9 : qm - 3;
+    const pqy = qm <= 3 ? year - 1 : year;
+    prevStartDate = `${pqy}-${String(pqm).padStart(2, '0')}-01`;
+    prevEndDate = startDate;
+  } else if (period === 'ytd') {
+    startDate = `${year}-01-01`;
+    prevStartDate = `${year - 1}-01-01`;
+    prevEndDate = `${year}-01-01`;
+  } else {
+    const d30 = new Date(now); d30.setDate(d30.getDate() - 30);
+    startDate = d30.toISOString().split('T')[0];
+    const d60 = new Date(now); d60.setDate(d60.getDate() - 60);
+    prevStartDate = d60.toISOString().split('T')[0];
+    prevEndDate = startDate;
+  }
+
+  // Current + previous revenue and expenses in parallel
+  const [revCur, revPrev, expCur, expPrev] = await Promise.all([
+    env.DB.prepare("SELECT COALESCE(SUM(total), 0) as t FROM invoices WHERE status = 'paid' AND paid_date >= ?").bind(startDate).first(),
+    env.DB.prepare("SELECT COALESCE(SUM(total), 0) as t FROM invoices WHERE status = 'paid' AND paid_date >= ? AND paid_date < ?").bind(prevStartDate, prevEndDate).first(),
+    env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as t FROM expenses WHERE date >= ?").bind(startDate).first(),
+    env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as t FROM expenses WHERE date >= ? AND date < ?").bind(prevStartDate, prevEndDate).first(),
+  ]);
+
+  const revenue = revCur.t;
+  const prevRevenue = revPrev.t;
+  const expenses = expCur.t;
+  const prevExpenses = expPrev.t;
+  const netIncome = revenue - expenses;
+  const prevNet = prevRevenue - prevExpenses;
+  const pct = (cur, prev) => prev > 0 ? Math.round((cur - prev) / prev * 1000) / 10 : 0;
+
+  // Monthly P&L — last 6 months (batch queries)
+  const monthlyPL = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(year, now.getMonth() - i, 1);
+    const mStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+    const mEndD = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const mEnd = `${mEndD.getFullYear()}-${String(mEndD.getMonth() + 1).padStart(2, '0')}-01`;
+    const mLabel = d.toLocaleDateString('en-US', { month: 'short' });
+    const [mRev, mExp] = await Promise.all([
+      env.DB.prepare("SELECT COALESCE(SUM(total), 0) as t FROM invoices WHERE status = 'paid' AND paid_date >= ? AND paid_date < ?").bind(mStart, mEnd).first(),
+      env.DB.prepare("SELECT COALESCE(SUM(amount), 0) as t FROM expenses WHERE date >= ? AND date < ?").bind(mStart, mEnd).first(),
+    ]);
+    monthlyPL.push({ month: mLabel, revenue: mRev.t, expenses: mExp.t, net: mRev.t - mExp.t });
+  }
+
+  // Recent transactions — combine invoices + expenses
+  const [recentInv, recentExp, invCount, expCount, propCount] = await Promise.all([
+    env.DB.prepare("SELECT id, invoice_number as ref, guest_name as description, total as amount, 'revenue' as type, COALESCE(paid_date, issue_date, created_at) as date, status FROM invoices ORDER BY created_at DESC LIMIT 10").all(),
+    env.DB.prepare("SELECT id, '' as ref, description, amount, 'expense' as type, date, 'posted' as status FROM expenses ORDER BY date DESC LIMIT 10").all(),
+    env.DB.prepare("SELECT COUNT(*) as c FROM invoices WHERE status != 'paid'").first(),
+    env.DB.prepare("SELECT COUNT(*) as c FROM expenses").first(),
+    env.DB.prepare("SELECT COUNT(*) as c FROM properties").first(),
+  ]);
+
+  const recentTransactions = [...recentInv.results, ...recentExp.results]
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .slice(0, 20);
+
+  return json({
+    summary: {
+      revenue, revenueChange: pct(revenue, prevRevenue),
+      expenses, expenseChange: pct(expenses, prevExpenses),
+      netIncome, netChange: prevNet !== 0 ? Math.round((netIncome - prevNet) / Math.abs(prevNet) * 1000) / 10 : 0,
+      cashBalance: netIncome,
+    },
+    monthlyPL,
+    recentTransactions,
+    counts: { openInvoices: invCount.c, totalExpenses: expCount.c, properties: propCount.c },
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3878,6 +4056,145 @@ async function handleCreateCRMGuest(request, env) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ADMIN PLANNER
+// ═══════════════════════════════════════════════════════════════
+
+async function handlePlannerData(url, env) {
+  const month = parseInt(url.searchParams.get('month') || String(new Date().getMonth()));
+  const year = parseInt(url.searchParams.get('year') || String(new Date().getFullYear()));
+
+  // Get total properties count
+  const propResult = await env.DB.prepare('SELECT COUNT(*) as cnt FROM properties').first();
+  const totalUnits = propResult?.cnt || 1;
+
+  // Build date range for the month
+  const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+  // Get all bookings that overlap this month (check_in <= endDate AND check_out >= startDate)
+  const bookings = await env.DB.prepare(`
+    SELECT id, guest_id, room_name, check_in, check_out, total, status
+    FROM bookings
+    WHERE status != 'cancelled'
+      AND check_in <= ? AND check_out >= ?
+  `).bind(endDate, startDate).all();
+
+  const rows = bookings.results || [];
+
+  // Compute per-day occupancy, revenue, check-ins, check-outs
+  const days = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    let occupied = 0;
+    let dayRevenue = 0;
+    let checkIns = 0;
+    let checkOuts = 0;
+
+    for (const b of rows) {
+      const ci = b.check_in.split('T')[0];
+      const co = b.check_out.split('T')[0];
+      // Count occupied if dateStr is within [check_in, check_out)
+      if (dateStr >= ci && dateStr < co) {
+        occupied++;
+        // Spread revenue across nights
+        const ciDate = new Date(ci);
+        const coDate = new Date(co);
+        const nights = Math.max(1, Math.round((coDate - ciDate) / 86400000));
+        dayRevenue += Math.round(((b.total || 0) / nights) * 100); // cents
+      }
+      if (ci === dateStr) checkIns++;
+      if (co === dateStr) checkOuts++;
+    }
+
+    const occupancy = totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0;
+    days.push({ date: d, occupancy, revenue: dayRevenue, checkIns, checkOuts });
+  }
+
+  return json({ days, totalUnits, month, year });
+}
+
+async function ensurePlannerNotesTable(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS planner_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT DEFAULT '',
+      category TEXT DEFAULT 'reminder',
+      pinned INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `).run();
+}
+
+async function handleListPlannerNotes(url, env) {
+  await ensurePlannerNotesTable(env);
+  const month = url.searchParams.get('month');
+  const year = url.searchParams.get('year');
+
+  let query = 'SELECT * FROM planner_notes';
+  const binds = [];
+
+  if (month !== null && year !== null) {
+    const m = parseInt(month);
+    const y = parseInt(year);
+    const startDate = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const endDate = `${y}-${String(m + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+    query += ' WHERE date >= ? AND date <= ?';
+    binds.push(startDate, endDate);
+  }
+
+  query += ' ORDER BY pinned DESC, created_at DESC';
+
+  const stmt = binds.length > 0
+    ? env.DB.prepare(query).bind(...binds)
+    : env.DB.prepare(query);
+  const result = await stmt.all();
+
+  const notes = (result.results || []).map(n => ({
+    id: String(n.id),
+    date: n.date,
+    title: n.title,
+    content: n.content || '',
+    category: n.category || 'reminder',
+    pinned: !!n.pinned,
+    createdAt: (n.created_at || '').split('T')[0],
+  }));
+
+  return json({ notes });
+}
+
+async function handleCreatePlannerNote(request, env) {
+  await ensurePlannerNotesTable(env);
+  const body = await request.json();
+  const { date, title, content, category } = body;
+  if (!title) return err('title is required');
+  if (!date) return err('date is required');
+
+  const result = await env.DB.prepare(
+    'INSERT INTO planner_notes (date, title, content, category) VALUES (?, ?, ?, ?)'
+  ).bind(date, title, content || '', category || 'reminder').run();
+
+  return json({ id: result.meta.last_row_id, success: true }, 201);
+}
+
+async function handleDeletePlannerNote(path, env) {
+  const id = path.split('/').pop();
+  await env.DB.prepare('DELETE FROM planner_notes WHERE id = ?').bind(Number(id)).run();
+  return json({ success: true });
+}
+
+async function handleTogglePinNote(path, env) {
+  const parts = path.split('/');
+  const id = parts[parts.length - 2]; // /admin/planner/notes/:id/pin
+  await env.DB.prepare('UPDATE planner_notes SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ?')
+    .bind(Number(id)).run();
+  return json({ success: true });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════════
 
@@ -3936,4 +4253,547 @@ async function handleDeleteNotification(path, env) {
   const id = path.split('/')[2];
   await env.DB.prepare('DELETE FROM notifications WHERE id = ?').bind(id).run();
   return json({ success: true });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAYROLL HANDLERS
+// ═══════════════════════════════════════════════════════════════
+
+async function ensurePayrollTables(env) {
+  // Add payroll columns to workers table (idempotent — ignore if already exist)
+  const columns = [
+    ['hourly_rate', 'INTEGER DEFAULT 0'],
+    ['employee_type', "TEXT DEFAULT 'full-time'"],
+    ['employee_status', "TEXT DEFAULT 'active'"],
+    ['hire_date', 'TEXT'],
+    ['address', 'TEXT'],
+    ['emergency_contact', 'TEXT'],
+  ];
+  for (const [col, def] of columns) {
+    try { await env.DB.prepare(`ALTER TABLE workers ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
+  }
+
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS payroll_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    pay_date TEXT NOT NULL,
+    total_gross INTEGER DEFAULT 0,
+    total_deductions INTEGER DEFAULT 0,
+    total_net INTEGER DEFAULT 0,
+    employee_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'draft',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).run();
+
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS payroll_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    worker_id INTEGER NOT NULL,
+    regular_hours REAL DEFAULT 0,
+    overtime_hours REAL DEFAULT 0,
+    hourly_rate INTEGER DEFAULT 0,
+    gross_pay INTEGER DEFAULT 0,
+    federal_tax INTEGER DEFAULT 0,
+    social_security INTEGER DEFAULT 0,
+    medicare INTEGER DEFAULT 0,
+    state_tax INTEGER DEFAULT 0,
+    total_deductions INTEGER DEFAULT 0,
+    net_pay INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).run();
+}
+
+// GET /admin/payroll/employees — enriched workers with payroll fields + latest pay data
+async function handlePayrollEmployees(env) {
+  await ensurePayrollTables(env);
+  const workers = await env.DB.prepare(`
+    SELECT w.id, w.name, w.phone, w.email, w.role, w.notes, w.is_active,
+      COALESCE(w.hourly_rate, 0) as hourly_rate,
+      COALESCE(w.employee_type, 'full-time') as employee_type,
+      COALESCE(w.employee_status, 'active') as employee_status,
+      w.hire_date, w.address, w.emergency_contact
+    FROM workers w ORDER BY w.is_active DESC, w.name
+  `).all();
+
+  // Get latest payroll entry per worker (most recent completed run)
+  const latestEntries = await env.DB.prepare(`
+    SELECT pe.worker_id, pe.regular_hours, pe.overtime_hours, pe.gross_pay,
+      pe.total_deductions, pe.net_pay, pe.hourly_rate as entry_rate
+    FROM payroll_entries pe
+    JOIN payroll_runs pr ON pe.run_id = pr.id
+    WHERE pr.status = 'completed'
+    ORDER BY pr.pay_date DESC
+  `).all();
+
+  // YTD gross per worker
+  const ytdData = await env.DB.prepare(`
+    SELECT pe.worker_id, SUM(pe.gross_pay) as ytd_gross
+    FROM payroll_entries pe
+    JOIN payroll_runs pr ON pe.run_id = pr.id
+    WHERE pr.status = 'completed' AND pr.pay_date >= strftime('%Y-01-01', 'now')
+    GROUP BY pe.worker_id
+  `).all();
+
+  const latestMap = {};
+  for (const e of (latestEntries.results || [])) {
+    if (!latestMap[e.worker_id]) latestMap[e.worker_id] = e;
+  }
+  const ytdMap = {};
+  for (const y of (ytdData.results || [])) {
+    ytdMap[y.worker_id] = y.ytd_gross || 0;
+  }
+
+  // Pay history per worker (last 10 entries)
+  const payHistory = await env.DB.prepare(`
+    SELECT pe.worker_id, pr.pay_date, pe.regular_hours + pe.overtime_hours as hours,
+      pe.gross_pay, pe.net_pay
+    FROM payroll_entries pe
+    JOIN payroll_runs pr ON pe.run_id = pr.id
+    WHERE pr.status = 'completed'
+    ORDER BY pr.pay_date DESC
+    LIMIT 200
+  `).all();
+
+  const payHistoryMap = {};
+  for (const ph of (payHistory.results || [])) {
+    if (!payHistoryMap[ph.worker_id]) payHistoryMap[ph.worker_id] = [];
+    if (payHistoryMap[ph.worker_id].length < 10) {
+      payHistoryMap[ph.worker_id].push({
+        date: ph.pay_date,
+        hours: ph.hours,
+        grossPay: ph.gross_pay,
+        netPay: ph.net_pay,
+      });
+    }
+  }
+
+  const employees = (workers.results || []).map(w => {
+    const latest = latestMap[w.id] || {};
+    return {
+      id: String(w.id),
+      name: w.name,
+      email: w.email || '',
+      phone: w.phone || '',
+      role: w.role || 'Cleaner',
+      type: w.employee_type || 'full-time',
+      status: w.employee_status || 'active',
+      hourlyRate: w.hourly_rate || 0,
+      hoursThisPeriod: latest.regular_hours || 0,
+      overtimeHours: latest.overtime_hours || 0,
+      grossPay: latest.gross_pay || 0,
+      deductions: latest.total_deductions || 0,
+      netPay: latest.net_pay || 0,
+      startDate: w.hire_date || '',
+      hireDate: w.hire_date || '',
+      address: w.address || '',
+      emergencyContact: w.emergency_contact || '',
+      ytdGross: ytdMap[w.id] || 0,
+      isActive: w.is_active,
+      payHistory: payHistoryMap[w.id] || [],
+    };
+  });
+
+  return json({ employees });
+}
+
+// POST /admin/payroll/employees — create a new employee with payroll fields
+async function handleCreatePayrollEmployee(request, env) {
+  await ensurePayrollTables(env);
+  const body = await request.json();
+  const { name, email, phone, role, hourlyRate, employeeType, hireDate, address, emergencyContact } = body;
+  if (!name) return err('name required');
+
+  await env.DB.prepare(`
+    INSERT INTO workers (name, email, phone, role, hourly_rate, employee_type, employee_status, hire_date, address, emergency_contact)
+    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+  `).bind(
+    name, email || '', phone || '', role || 'Cleaner',
+    hourlyRate || 0, employeeType || 'full-time',
+    hireDate || new Date().toISOString().split('T')[0],
+    address || '', emergencyContact || ''
+  ).run();
+
+  const worker = await env.DB.prepare('SELECT * FROM workers WHERE name = ? ORDER BY id DESC LIMIT 1').bind(name).first();
+  log('info', 'Payroll employee created', { id: worker?.id, name });
+  return json({ success: true, id: worker?.id });
+}
+
+// PUT /admin/payroll/employees/:id — update payroll fields
+async function handleUpdatePayrollEmployee(request, path, env) {
+  await ensurePayrollTables(env);
+  const id = path.split('/').pop();
+  const body = await request.json();
+  const fields = [];
+  const binds = [];
+
+  const allowedFields = {
+    name: 'name', email: 'email', phone: 'phone', role: 'role',
+    hourlyRate: 'hourly_rate', employeeType: 'employee_type',
+    employeeStatus: 'employee_status', hireDate: 'hire_date',
+    address: 'address', emergencyContact: 'emergency_contact',
+    isActive: 'is_active',
+  };
+
+  for (const [jsKey, dbCol] of Object.entries(allowedFields)) {
+    if (body[jsKey] !== undefined) {
+      fields.push(`${dbCol} = ?`);
+      binds.push(jsKey === 'isActive' ? (body[jsKey] ? 1 : 0) : body[jsKey]);
+    }
+  }
+
+  if (fields.length === 0) return err('No fields to update');
+  binds.push(id);
+  await env.DB.prepare(`UPDATE workers SET ${fields.join(', ')} WHERE id = ?`).bind(...binds).run();
+  log('info', 'Payroll employee updated', { id, fields: Object.keys(body) });
+  return json({ success: true });
+}
+
+// GET /admin/payroll/runs — list payroll runs
+async function handleListPayrollRuns(url, env) {
+  await ensurePayrollTables(env);
+  const limit = parseInt(url.searchParams.get('limit') || '50');
+  const runs = await env.DB.prepare(`
+    SELECT * FROM payroll_runs ORDER BY created_at DESC LIMIT ?
+  `).bind(limit).all();
+
+  return json({
+    runs: (runs.results || []).map(r => ({
+      id: String(r.id),
+      period: `${r.period_start} - ${r.period_end}`,
+      periodStart: r.period_start,
+      periodEnd: r.period_end,
+      payDate: r.pay_date,
+      totalGross: r.total_gross,
+      totalDeductions: r.total_deductions,
+      totalNet: r.total_net,
+      employeeCount: r.employee_count,
+      status: r.status,
+      createdAt: r.created_at,
+    })),
+  });
+}
+
+// POST /admin/payroll/runs — create payroll run with all entries
+async function handleCreatePayrollRun(request, env) {
+  await ensurePayrollTables(env);
+  const body = await request.json();
+  const { periodStart, periodEnd, payDate, entries } = body;
+  if (!periodStart || !periodEnd || !payDate) return err('periodStart, periodEnd, payDate required');
+  if (!entries || !Array.isArray(entries) || entries.length === 0) return err('entries array required');
+
+  let totalGross = 0, totalDeductions = 0, totalNet = 0;
+  for (const e of entries) {
+    totalGross += e.grossPay || 0;
+    totalDeductions += e.totalDeductions || 0;
+    totalNet += e.netPay || 0;
+  }
+
+  // Insert run
+  await env.DB.prepare(`
+    INSERT INTO payroll_runs (period_start, period_end, pay_date, total_gross, total_deductions, total_net, employee_count, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')
+  `).bind(periodStart, periodEnd, payDate, totalGross, totalDeductions, totalNet, entries.length).run();
+
+  const run = await env.DB.prepare('SELECT id FROM payroll_runs ORDER BY id DESC LIMIT 1').first();
+  const runId = run.id;
+
+  // Insert entries
+  for (const e of entries) {
+    await env.DB.prepare(`
+      INSERT INTO payroll_entries (run_id, worker_id, regular_hours, overtime_hours, hourly_rate,
+        gross_pay, federal_tax, social_security, medicare, state_tax, total_deductions, net_pay)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      runId, parseInt(e.employeeId), e.regularHours || 0, e.overtimeHours || 0, e.hourlyRate || 0,
+      e.grossPay || 0, e.federalTax || 0, e.socialSecurity || 0, e.medicare || 0,
+      e.stateTax || 0, e.totalDeductions || 0, e.netPay || 0
+    ).run();
+  }
+
+  log('info', 'Payroll run created', { runId, employees: entries.length, totalNet });
+  return json({ success: true, runId: String(runId) });
+}
+
+// GET /admin/payroll/runs/:id — single run with entries
+async function handleGetPayrollRun(path, env) {
+  await ensurePayrollTables(env);
+  const id = path.split('/').pop();
+  const run = await env.DB.prepare('SELECT * FROM payroll_runs WHERE id = ?').bind(id).first();
+  if (!run) return err('Run not found', 404);
+
+  const entries = await env.DB.prepare(`
+    SELECT pe.*, w.name as employee_name, w.role as employee_role
+    FROM payroll_entries pe
+    LEFT JOIN workers w ON pe.worker_id = w.id
+    WHERE pe.run_id = ?
+    ORDER BY w.name
+  `).bind(id).all();
+
+  return json({
+    id: String(run.id),
+    period: `${run.period_start} - ${run.period_end}`,
+    periodStart: run.period_start,
+    periodEnd: run.period_end,
+    payDate: run.pay_date,
+    totalGross: run.total_gross,
+    totalDeductions: run.total_deductions,
+    totalNet: run.total_net,
+    employeeCount: run.employee_count,
+    status: run.status,
+    createdAt: run.created_at,
+    entries: (entries.results || []).map(e => ({
+      id: String(e.id),
+      employeeId: String(e.worker_id),
+      name: e.employee_name,
+      role: e.employee_role,
+      regularHours: e.regular_hours,
+      overtimeHours: e.overtime_hours,
+      hourlyRate: e.hourly_rate,
+      grossPay: e.gross_pay,
+      federalTax: e.federal_tax,
+      socialSecurity: e.social_security,
+      medicare: e.medicare,
+      stateTax: e.state_tax,
+      totalDeductions: e.total_deductions,
+      netPay: e.net_pay,
+    })),
+  });
+}
+
+// ─── DISPATCH TASK HANDLERS ───────────────────────────────────────────────
+
+async function ensureDispatchTable(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS dispatch_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'Cleaning',
+      property TEXT DEFAULT '',
+      assignee TEXT DEFAULT '',
+      priority TEXT NOT NULL DEFAULT 'Medium',
+      due_date TEXT DEFAULT '',
+      due_time TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Pending',
+      notes TEXT DEFAULT '',
+      estimated_minutes INTEGER DEFAULT 60,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `).run();
+}
+
+// GET /admin/dispatch/tasks
+async function handleListDispatchTasks(url, env) {
+  await ensureDispatchTable(env);
+  const status = url.searchParams.get('status');
+  const property = url.searchParams.get('property');
+  const assignee = url.searchParams.get('assignee');
+
+  let sql = 'SELECT * FROM dispatch_tasks WHERE 1=1';
+  const binds = [];
+  if (status) { sql += ' AND status = ?'; binds.push(status); }
+  if (property) { sql += ' AND property = ?'; binds.push(property); }
+  if (assignee) { sql += ' AND assignee = ?'; binds.push(assignee); }
+  sql += ' ORDER BY CASE priority WHEN \'Urgent\' THEN 0 WHEN \'High\' THEN 1 WHEN \'Medium\' THEN 2 ELSE 3 END, due_date ASC, due_time ASC';
+
+  const result = await env.DB.prepare(sql).bind(...binds).all();
+  log('info', 'Dispatch tasks listed', { count: result.results.length });
+  return json(result.results || []);
+}
+
+// POST /admin/dispatch/tasks
+async function handleCreateDispatchTask(request, env) {
+  await ensureDispatchTable(env);
+  const body = await request.json();
+  const { title, type, property, assignee, priority, dueDate, dueTime, notes, estimatedMinutes } = body;
+  if (!title) return err('title is required');
+
+  const result = await env.DB.prepare(
+    'INSERT INTO dispatch_tasks (title, type, property, assignee, priority, due_date, due_time, notes, estimated_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(
+    title, type || 'Cleaning', property || '', assignee || '', priority || 'Medium',
+    dueDate || '', dueTime || '', notes || '', estimatedMinutes || 60
+  ).run();
+
+  const task = await env.DB.prepare('SELECT * FROM dispatch_tasks WHERE id = ?').bind(result.meta.last_row_id).first();
+  log('info', 'Dispatch task created', { id: task.id, title });
+  return json(task, 201);
+}
+
+// PUT /admin/dispatch/tasks/:id
+async function handleUpdateDispatchTask(request, path, env) {
+  await ensureDispatchTable(env);
+  const id = parseInt(path.split('/').pop());
+  const body = await request.json();
+
+  const fields = [];
+  const binds = [];
+  const allowed = { title: 'title', type: 'type', property: 'property', assignee: 'assignee', priority: 'priority', dueDate: 'due_date', dueTime: 'due_time', status: 'status', notes: 'notes', estimatedMinutes: 'estimated_minutes' };
+
+  for (const [jsKey, dbCol] of Object.entries(allowed)) {
+    if (body[jsKey] !== undefined) {
+      fields.push(`${dbCol} = ?`);
+      binds.push(body[jsKey]);
+    }
+  }
+
+  if (fields.length === 0) return err('No fields to update');
+  fields.push("updated_at = datetime('now')");
+  binds.push(id);
+
+  await env.DB.prepare(`UPDATE dispatch_tasks SET ${fields.join(', ')} WHERE id = ?`).bind(...binds).run();
+  const task = await env.DB.prepare('SELECT * FROM dispatch_tasks WHERE id = ?').bind(id).first();
+  if (!task) return err('Task not found', 404);
+
+  log('info', 'Dispatch task updated', { id, fields: Object.keys(body) });
+  return json(task);
+}
+
+// DELETE /admin/dispatch/tasks/:id
+async function handleDeleteDispatchTask(path, env) {
+  await ensureDispatchTable(env);
+  const id = parseInt(path.split('/').pop());
+  const task = await env.DB.prepare('SELECT * FROM dispatch_tasks WHERE id = ?').bind(id).first();
+  if (!task) return err('Task not found', 404);
+
+  await env.DB.prepare('DELETE FROM dispatch_tasks WHERE id = ?').bind(id).run();
+  log('info', 'Dispatch task deleted', { id, title: task.title });
+  return json({ success: true });
+}
+
+// ============================================
+// INVENTORY MANAGEMENT
+// ============================================
+
+async function ensureInventoryTable(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS inventory_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'Maintenance',
+      quantity INTEGER NOT NULL DEFAULT 0,
+      reorder_point INTEGER NOT NULL DEFAULT 10,
+      unit_cost INTEGER NOT NULL DEFAULT 0,
+      location TEXT DEFAULT 'Central Warehouse',
+      sku TEXT DEFAULT '',
+      last_restocked TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      destination TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (item_id) REFERENCES inventory_items(id)
+    )
+  `).run();
+}
+
+// GET /admin/inventory
+async function handleListInventory(url, env) {
+  await ensureInventoryTable(env);
+  const category = url.searchParams.get('category');
+  let sql = 'SELECT * FROM inventory_items WHERE 1=1';
+  const binds = [];
+  if (category) { sql += ' AND category = ?'; binds.push(category); }
+  sql += ' ORDER BY name ASC';
+  const result = await env.DB.prepare(sql).bind(...binds).all();
+  log('info', 'Inventory listed', { count: result.results.length });
+  return json(result.results || []);
+}
+
+// POST /admin/inventory
+async function handleCreateInventoryItem(request, env) {
+  await ensureInventoryTable(env);
+  const body = await request.json();
+  const { name, category, quantity, reorderPoint, unitCost, location, sku } = body;
+  if (!name) return err('name is required');
+  const result = await env.DB.prepare(
+    'INSERT INTO inventory_items (name, category, quantity, reorder_point, unit_cost, location, sku, last_restocked) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(
+    name, category || 'Maintenance', quantity || 0, reorderPoint || 10,
+    unitCost || 0, location || 'Central Warehouse', sku || '',
+    new Date().toISOString().split('T')[0]
+  ).run();
+  const item = await env.DB.prepare('SELECT * FROM inventory_items WHERE id = ?').bind(result.meta.last_row_id).first();
+  log('info', 'Inventory item created', { id: item.id, name });
+  return json(item, 201);
+}
+
+// PUT /admin/inventory/:id
+async function handleUpdateInventoryItem(request, path, env) {
+  await ensureInventoryTable(env);
+  const id = parseInt(path.split('/').pop());
+  const body = await request.json();
+  const fields = [];
+  const binds = [];
+  const allowed = { name: 'name', category: 'category', quantity: 'quantity', reorderPoint: 'reorder_point', unitCost: 'unit_cost', location: 'location', sku: 'sku', lastRestocked: 'last_restocked' };
+  for (const [jsKey, dbCol] of Object.entries(allowed)) {
+    if (body[jsKey] !== undefined) { fields.push(`${dbCol} = ?`); binds.push(body[jsKey]); }
+  }
+  if (fields.length === 0) return err('No fields to update');
+  fields.push("updated_at = datetime('now')");
+  binds.push(id);
+  await env.DB.prepare(`UPDATE inventory_items SET ${fields.join(', ')} WHERE id = ?`).bind(...binds).run();
+  const item = await env.DB.prepare('SELECT * FROM inventory_items WHERE id = ?').bind(id).first();
+  if (!item) return err('Item not found', 404);
+  log('info', 'Inventory item updated', { id, fields: Object.keys(body) });
+  return json(item);
+}
+
+// DELETE /admin/inventory/:id
+async function handleDeleteInventoryItem(path, env) {
+  await ensureInventoryTable(env);
+  const id = parseInt(path.split('/').pop());
+  const item = await env.DB.prepare('SELECT * FROM inventory_items WHERE id = ?').bind(id).first();
+  if (!item) return err('Item not found', 404);
+  await env.DB.prepare('DELETE FROM inventory_movements WHERE item_id = ?').bind(id).run();
+  await env.DB.prepare('DELETE FROM inventory_items WHERE id = ?').bind(id).run();
+  log('info', 'Inventory item deleted', { id, name: item.name });
+  return json({ success: true });
+}
+
+// POST /admin/inventory/:id/movement
+async function handleInventoryMovement(request, path, env) {
+  await ensureInventoryTable(env);
+  const parts = path.split('/');
+  const id = parseInt(parts[parts.length - 2]);
+  const body = await request.json();
+  const { type, quantity, destination, notes } = body;
+  if (!type || !quantity) return err('type and quantity are required');
+  if (!['add', 'use', 'transfer'].includes(type)) return err('type must be add, use, or transfer');
+
+  const item = await env.DB.prepare('SELECT * FROM inventory_items WHERE id = ?').bind(id).first();
+  if (!item) return err('Item not found', 404);
+
+  let newQty = item.quantity;
+  if (type === 'add') {
+    newQty = item.quantity + quantity;
+  } else if (type === 'use' || type === 'transfer') {
+    newQty = Math.max(0, item.quantity - quantity);
+  }
+
+  const updateFields = [`quantity = ?`, "updated_at = datetime('now')"];
+  const updateBinds = [newQty];
+  if (type === 'add') {
+    updateFields.push('last_restocked = ?');
+    updateBinds.push(new Date().toISOString().split('T')[0]);
+  }
+  updateBinds.push(id);
+  await env.DB.prepare(`UPDATE inventory_items SET ${updateFields.join(', ')} WHERE id = ?`).bind(...updateBinds).run();
+
+  await env.DB.prepare(
+    'INSERT INTO inventory_movements (item_id, type, quantity, destination, notes) VALUES (?, ?, ?, ?, ?)'
+  ).bind(id, type, quantity, destination || '', notes || '').run();
+
+  const updated = await env.DB.prepare('SELECT * FROM inventory_items WHERE id = ?').bind(id).first();
+  log('info', 'Inventory movement', { id, type, quantity, newQty });
+  return json(updated);
 }
